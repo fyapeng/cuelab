@@ -1,4 +1,4 @@
-import { TABLES, DEFAULT_PHYS, NOISE_LEVELS, G } from './physics/presets.js';
+import { TABLES, DEFAULT_PHYS, NOISE_LEVELS, LEVEL_ORDER, G } from './physics/presets.js';
 import { buildTable } from './physics/table.js';
 import { simulate, trackPos } from './physics/sim.js';
 import { strike, MISCUE_LIMIT } from './physics/cue.js';
@@ -339,10 +339,10 @@ function startMatch() {
   }
   const opp = $('oppSel').value;
   S.match = { opp, aid: $('aidSel').value, humanNoise: $('humanNoiseSel').value };
-  const cpuName = opp === 'cpu-pro' ? '电脑（高手）' : '电脑（业余）';
-  const players = opp === 'human'
+  const level = opp.startsWith('cpu-') ? opp.slice(4) : null;
+  const players = !level
     ? [{ name: '玩家 1', cpu: false }, { name: '玩家 2', cpu: false }]
-    : [{ name: '你', cpu: false }, { name: cpuName, cpu: true, level: opp === 'cpu-pro' ? 'pro' : 'amateur' }];
+    : [{ name: '你', cpu: false }, { name: `电脑（${NOISE_LEVELS[level].name}）`, cpu: true, level }];
   S.mode = 'match';
   S.game = createGame(S.tableKey, players);
   S.cpu.id++;
@@ -476,7 +476,7 @@ function cpuTurn() {
       if (id !== S.cpu.id) return;
       const c = S.balls[0];
       const apex = S.balls.slice(1).sort((a, b) => Math.hypot(a.x - c.x, a.y - c.y) - Math.hypot(b.x - c.x, b.y - c.y))[0];
-      executeCpuPlan({ kind: 'break', shot: { aim: Math.atan2(apex.y - c.y, apex.x - c.x), side: 0, height: -0.1, elev: 0 }, ballSpeed: p.level === 'pro' ? 9.5 : 8 });
+      executeCpuPlan({ kind: 'break', shot: { aim: Math.atan2(apex.y - c.y, apex.x - c.x), side: 0, height: -0.1, elev: 0 }, ballSpeed: { elite: 9.5, pro: 9.5, club: 8.5, amateur: 7.5, beginner: 6 }[p.level] ?? 8 });
     }, 500);
     return;
   }
@@ -498,7 +498,7 @@ function executeCpuPlan(plan) {
   S.elev = 0;
   syncControls();
   const kindName = { pot: '进攻', safety: '防守', break: '开球', fallback: '碰球', bank: '一库翻袋', kick: '一库解球' }[plan.kind] ?? '';
-  const extra = [];
+  const extra = [strokeName(plan.shot, plan.ballSpeed)];
   if (plan.p !== undefined) extra.push(`估计进球率 ${Math.round(plan.p * 100)}%`);
   if (plan.width !== undefined) extra.push(`瞄准容错 ${(plan.width * DEG).toFixed(2)}°`);
   S.message = `${p.name}：${kindName}${extra.length ? `（${extra.join('，')}）` : ''}`;
@@ -511,6 +511,15 @@ function executeCpuPlan(plan) {
     const s = perturbShot(shot(), NOISE_LEVELS[p.level], S.table.R, makeRng((Math.random() * 2 ** 32) >>> 0));
     shootWith(s, true);
   }, plan.guide ? 2200 : 1100);
+}
+
+/** 杆法描述，例如“中力 · 低杆右塞” */
+function strokeName(shot, v) {
+  const h = shot.height, s = shot.side;
+  const hv = h > 0.08 ? '高杆' : h < -0.08 ? '低杆' : '中杆';
+  const sv = s > 0.08 ? '右塞' : s < -0.08 ? '左塞' : '';
+  const name = hv === '中杆' && sv ? sv : hv + sv;
+  return `${speedClass(v)} · ${name}`;
 }
 
 function renderScoreboard() {
@@ -1359,6 +1368,17 @@ setInterval(() => {
 
 window.cuelab = { S, predict, startMatch, setMode, cpuTurn };
 
+function fillLevelSelects() {
+  const lv = LEVEL_ORDER.map((k) => [k, NOISE_LEVELS[k]]);
+  const desc = (n) => `瞄准 ${n.aimDeg}° · 击打点 ${n.tipMM} mm · 力度 ${n.speedPct}%`;
+  $('noiseSel').innerHTML = '<option value="off">关闭</option>' + lv.map(([k, n]) => `<option value="${k}" title="${desc(n)}">${n.name}</option>`).join('');
+  $('noiseSel').value = S.noiseKey;
+  $('oppSel').innerHTML = lv.map(([k, n]) => `<option value="cpu-${k}">电脑（${n.name}）</option>`).join('') + '<option value="human">本地双人</option>';
+  $('oppSel').value = 'cpu-club';
+  $('humanNoiseSel').innerHTML = '<option value="off">无（按你瞄的精确出杆）</option>' + lv.map(([k, n]) => `<option value="${k}">${n.name}</option>`).join('');
+}
+
+fillLevelSelects();
 setTable(S.tableKey);
 updateModeUI();
 syncControls();

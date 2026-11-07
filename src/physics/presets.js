@@ -97,12 +97,26 @@ export const DEFAULT_PHYS = {
 };
 
 /**
- * 出杆稳定性（每杆误差的标准差），用于容错带蒙特卡洛。
- * 这是示意性的设定而非实测：长台直线球的切角误差 ≈ (母球到目标球距离 / 球径) × 出杆方向误差，
- * 击打点横向偏 1 mm 又会带来约 0.2° 的偏杆，所以方向误差取零点几度量级即可再现常见的进球率。
+ * 出杆稳定性（每杆误差的标准差），用于容错分析、出杆误差模拟和电脑对手。
+ *
+ * 切角误差 ≈ (母球到目标球距离 / 球径) × 出杆方向误差，斯诺克 2 m 长台约放大 40 倍；
+ * 击打点横向偏 0.1 mm 又会带来约 0.02° 的偏杆。所以真正的职业水准对应百分之一度量级的方向误差。
+ * 各档按下面几种标准球的进袋率标定（tests/calibrate.mjs，各 400 次）：
+ *
+ *              中八中距离30°  中八长台直球  斯诺克中距离25°  斯诺克长台
+ *   顶级职业        100%          90%           100%           73%
+ *   职业            100%          80%           100%           53%
+ *   业余高手         97%          50%            75%           27%
+ *   业余             70%          25%            42%           15%
+ *   新手             33%          13%            19%            8%
+ *
+ * 这些是示意性设定：数值让各档的进袋率接近常见印象，不是对真人的测量。
  */
 export const NOISE_LEVELS = {
-  pro: { name: '职业', aimDeg: 0.05, tipMM: 0.5, speedPct: 2 },
-  amateur: { name: '业余', aimDeg: 0.1, tipMM: 1.0, speedPct: 5 },
-  beginner: { name: '新手', aimDeg: 0.25, tipMM: 2.5, speedPct: 10 },
+  elite: { name: '顶级职业', aimDeg: 0.008, tipMM: 0.08, speedPct: 1.5 },
+  pro: { name: '职业', aimDeg: 0.012, tipMM: 0.12, speedPct: 2 },
+  club: { name: '业余高手', aimDeg: 0.025, tipMM: 0.25, speedPct: 3 },
+  amateur: { name: '业余', aimDeg: 0.05, tipMM: 0.5, speedPct: 5 },
+  beginner: { name: '新手', aimDeg: 0.12, tipMM: 1.2, speedPct: 10 },
 };
+export const LEVEL_ORDER = ['elite', 'pro', 'club', 'amateur', 'beginner'];

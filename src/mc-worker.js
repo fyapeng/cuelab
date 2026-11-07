@@ -36,6 +36,7 @@ function runAI(job) {
     oppTargets: job.oppTargets,
     values: job.values,
     noise: NOISE_LEVELS[job.level],
+    level: job.level,
     nextTargets: (t) => job.next[t] ?? [],
     inRegion: job.region ? (x, y) => inRegion(job.region, table, x, y) : null,
     seed: job.seed,

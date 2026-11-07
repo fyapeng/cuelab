@@ -61,7 +61,7 @@ export function directShots(table, balls, cx, cy, targets, values = null) {
       if (blocked(T.x, T.y, ax, ay, balls, [0, t], R)) continue;
       const ease = (cosCut ** 1.5 * Math.cos(approach) ** 0.5) / ((0.35 + d1) * (0.35 + d2));
       const w = values ? 0.6 + 0.4 * (values[t] / 7) : 1;
-      out.push({ t, k, aim: Math.atan2(uy, ux), ease, score: ease * w, cut: Math.acos(Math.min(1, cosCut)), d1, d2 });
+      out.push({ t, k, aim: Math.atan2(uy, ux), ease, score: ease * w, cut: Math.acos(Math.min(1, cosCut)), d1, d2, dir: Math.atan2(dy, dx) });
     }
   }
   return out.sort((a, b) => b.score - a.score);
@@ -71,12 +71,74 @@ function positionValue(table, balls, targets, values) {
   const c = balls[0];
   if (!c || c.on === false) return 0;
   const ds = directShots(table, balls, c.x, c.y, targets.filter((i) => balls[i] && balls[i].on !== false), values);
-  return ds.length ? ds[0].score : 0;
+  // 最好的一杆为主，第二好的一杆作为“备选”加分：走位留有余地比只有一条线路更稳
+  return ds.length ? ds[0].score + 0.35 * (ds[1]?.score ?? 0) : 0;
 }
 
+/**
+ * 各档电脑的思考深度。出杆误差另见 presets.js 的 NOISE_LEVELS（电脑用同名档位的误差出杆，也用它来估计进球率）。
+ *   cands   每杆考虑的直接进攻线路数
+ *   K       估计进球率时每个方案的模拟次数
+ *   side    是否尝试左右塞；refine 是否在最好方案附近细调
+ *   attack  估计进球率低于这个值时，如果有像样的防守就改打防守
+ *   safetyAims  防守时每颗球尝试的厚薄数
+ */
+export const AI_LEVELS = {
+  beginner: { cands: 4, K: 6, side: false, refine: false, attack: 0.12, safetyAims: 3, bank: false },
+  amateur: { cands: 5, K: 8, side: false, refine: false, attack: 0.25, safetyAims: 5, bank: true },
+  club: { cands: 7, K: 10, side: true, refine: true, attack: 0.35, safetyAims: 5, bank: true },
+  pro: { cands: 8, K: 14, side: true, refine: true, attack: 0.45, safetyAims: 7, bank: true },
+  elite: { cands: 9, K: 18, side: true, refine: true, attack: 0.5, safetyAims: 9, bank: true },
+};
+const cfgOf = (ctx) => AI_LEVELS[ctx.level] ?? AI_LEVELS.pro;
+
+// 力度（母球初速 m/s）× 高低杆 × 左右塞（单位 R）。前 10 组是原来的高低杆组合，后面加入左右塞。
 const VARIANTS = [
-  [0.8, 0], [1.2, 0], [1.2, 0.3], [1.2, -0.35], [1.8, 0], [1.8, 0.3], [1.8, -0.35], [2.6, 0], [2.6, -0.4], [3.6, 0],
+  [0.8, 0, 0], [1.2, 0, 0], [1.2, 0.3, 0], [1.2, -0.35, 0], [1.8, 0, 0], [1.8, 0.3, 0], [1.8, -0.35, 0],
+  [2.6, 0, 0], [2.6, -0.4, 0], [3.6, 0, 0],
+  [1.2, 0, 0.3], [1.2, 0, -0.3], [1.8, 0, 0.3], [1.8, 0, -0.3], [1.8, 0.3, 0.3], [1.8, 0.3, -0.3],
+  [1.8, -0.35, 0.3], [1.8, -0.35, -0.3], [2.6, 0, 0.3], [2.6, 0, -0.3],
 ];
+
+const angDiff = (a, b) => {
+  let d = a - b;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+};
+
+/**
+ * 修正瞄准：加塞会让母球偏离球杆方向（偏杆、弧线），球间摩擦会让目标球偏离连心线（投掷），
+ * 只瞄几何假想球会打偏。这里用割线法迭代瞄准角，使目标球的实际出射方向等于指向袋口的方向。
+ * 每次迭代只模拟到母球第一次碰球为止，开销很小。返回 null 表示碰不到目标球。
+ */
+export function correctAim(table, P, balls, shot, t, desiredDir) {
+  const err = (aim) => {
+    const { ball } = strike(balls[0], table, P, { ...shot, aim });
+    const r = simulate([ball, ...balls.slice(1)], table, P, { record: false, stopOnFirstHit: true, maxTime: 10 });
+    if (!r.firstHit || r.firstHit.obj !== t) return NaN;
+    return angDiff(r.firstHit.objDir, desiredDir);
+  };
+  let a0 = shot.aim, e0 = err(a0);
+  if (!Number.isFinite(e0)) return null;
+  if (Math.abs(e0) < 2e-4) return a0;
+  // 瞄准角往左偏，母球碰到目标球右侧，目标球往右走：斜率为负，量级约 D/(2R)。先按这个估计走一步
+  const c = balls[0], T = balls[t];
+  const D = Math.max(Math.hypot(T.x - c.x, T.y - c.y) - 2 * table.R, 2 * table.R);
+  let step = (e0 * 2 * table.R) / D;
+  let a1 = a0 + step, e1 = err(a1);
+  for (let k = 0; k < 3 && !Number.isFinite(e1); k++) { step /= 2; a1 = a0 + step; e1 = err(a1); }
+  for (let k = 0; k < 6; k++) {
+    if (!Number.isFinite(e1)) return null;
+    if (Math.abs(e1) < 2e-4) break;
+    const slope = (e1 - e0) / (a1 - a0);
+    if (!Number.isFinite(slope) || Math.abs(slope) < 1e-6) break;
+    const a2 = a1 - e1 / slope;
+    a0 = a1; e0 = e1;
+    a1 = a2; e1 = err(a2);
+  }
+  return Number.isFinite(e1) && Math.abs(e1) < 0.01 ? a1 : null;
+}
 
 function potOk(res, t, ctx) {
   if (!res.balls[0].on) return false;
@@ -86,35 +148,76 @@ function potOk(res, t, ctx) {
   return true;
 }
 
-function planFrom(ctx, balls, rng) {
+/** 试一组出杆参数：修正瞄准 → 完整模拟 → 要求进球不犯规 → 评估走位 */
+function tryStroke(ctx, balls, cand, v, h, sd) {
   const { table, phys: P } = ctx;
+  const base = { aim: cand.aim, speed: cueSpeedFor(v, table, P), side: sd, height: h, elev: 0 };
+  const aim = correctAim(table, P, balls, base, cand.t, cand.dir);
+  if (aim === null) return null;
+  const shot = { ...base, aim };
+  const res = run(table, P, balls, shot);
+  if (!potOk(res, cand.t, ctx)) return null;
+  const next = ctx.nextTargets(cand.t).filter((i) => res.balls[i].on);
+  const pos = next.length ? positionValue(table, res.balls, next, ctx.values) : 0.5;
+  return { cand, shot, ballSpeed: v, pos, pre: cand.score * (0.4 + pos) };
+}
+
+function scoreStroke(ctx, balls, f, rng) {
+  const K = cfgOf(ctx).K;
+  let ok = 0;
+  for (let k = 0; k < K; k++) {
+    const s = perturbShot(f.shot, ctx.noise, ctx.table.R, rng);
+    if (potOk(run(ctx.table, ctx.phys, balls, s), f.cand.t, ctx)) ok++;
+  }
+  f.p = ok / K;
+  const val = ctx.values ? ctx.values[f.cand.t] : 1;
+  f.score = f.p * (1 + 0.15 * val + 2.5 * Math.min(f.pos, 1.5)) - (1 - f.p) * 0.4;
+  return f;
+}
+
+/** 在最好的方案附近对力度、高低杆、左右塞各做一轮小范围调整，更好就采用 */
+function refineStroke(ctx, balls, best, rng) {
+  let cur = best;
+  const tweaks = [
+    [cur.ballSpeed * 0.85, cur.shot.height, cur.shot.side],
+    [cur.ballSpeed * 1.15, cur.shot.height, cur.shot.side],
+    [cur.ballSpeed, cur.shot.height + 0.15, cur.shot.side],
+    [cur.ballSpeed, cur.shot.height - 0.15, cur.shot.side],
+    [cur.ballSpeed, cur.shot.height, cur.shot.side + 0.15],
+    [cur.ballSpeed, cur.shot.height, cur.shot.side - 0.15],
+  ];
+  for (const [v, h, sd] of tweaks) {
+    if (Math.hypot(h, sd) > 0.5) continue; // 不超出滑杆界限
+    const f = tryStroke(ctx, balls, best.cand, v, h, sd);
+    if (!f || f.pre < cur.pre * 0.9) continue;
+    scoreStroke(ctx, balls, f, rng);
+    if (f.score > cur.score) cur = f;
+  }
+  return cur;
+}
+
+function planFrom(ctx, balls, rng, opts = {}) {
+  const cfg = cfgOf(ctx);
+  const refine = opts.refine ?? cfg.refine;
+  const nCands = opts.nCands ?? cfg.cands;
+  const { table } = ctx;
   const c = balls[0];
-  const cands = directShots(table, balls, c.x, c.y, ctx.targets, ctx.values).slice(0, 7);
+  const cands = directShots(table, balls, c.x, c.y, ctx.targets, ctx.values).slice(0, nCands);
+  const variants = cfg.side ? VARIANTS : VARIANTS.filter((v) => v[2] === 0);
   const found = [];
   for (const cand of cands) {
-    for (const [v, h] of VARIANTS) {
-      const shot = { aim: cand.aim, speed: cueSpeedFor(v, table, P), side: 0, height: h, elev: 0 };
-      const res = run(table, P, balls, shot);
-      if (!potOk(res, cand.t, ctx)) continue;
-      const next = ctx.nextTargets(cand.t).filter((i) => res.balls[i].on);
-      const pos = next.length ? positionValue(table, res.balls, next, ctx.values) : 0.5;
-      found.push({ cand, shot, ballSpeed: v, pos, pre: cand.score * (0.4 + pos) });
+    for (const [v, h, sd] of variants) {
+      const f = tryStroke(ctx, balls, cand, v, h, sd);
+      if (f) found.push(f);
     }
   }
   found.sort((a, b) => b.pre - a.pre);
   let best = null;
-  for (const f of found.slice(0, 5)) {
-    let ok = 0;
-    const K = 10;
-    for (let k = 0; k < K; k++) {
-      const s = perturbShot(f.shot, ctx.noise, table.R, rng);
-      if (potOk(run(table, P, balls, s), f.cand.t, ctx)) ok++;
-    }
-    f.p = ok / K;
-    const val = ctx.values ? ctx.values[f.cand.t] : 1;
-    f.score = f.p * (1 + 0.15 * val + 2.5 * Math.min(f.pos, 1.5)) - (1 - f.p) * 0.4;
+  for (const f of found.slice(0, 6)) {
+    scoreStroke(ctx, balls, f, rng);
     if (!best || f.score > best.score) best = f;
   }
+  if (best && refine) best = refineStroke(ctx, balls, best, rng);
   return best;
 }
 
@@ -129,9 +232,12 @@ function safetyFrom(ctx, balls) {
   let best = null;
   for (const { i, d } of ts) {
     const base = Math.atan2(balls[i].y - c.y, balls[i].x - c.x);
-    for (const off of [-0.85, -0.45, 0, 0.45, 0.85]) {
+    const n = cfgOf(ctx).safetyAims;
+    const offs = Array.from({ length: n }, (_, k) => (n === 1 ? 0 : -0.9 + (1.8 * k) / (n - 1)));
+    const speeds = n >= 7 ? [0.7, 1.2, 2.0, 3.0] : [0.9, 1.6, 2.6];
+    for (const off of offs) {
       const aim = base + Math.asin(Math.max(-0.99, Math.min(0.99, (off * 2 * R) / Math.max(d, 2 * R))));
-      for (const v of [0.9, 1.6, 2.6]) {
+      for (const v of speeds) {
         const shot = { aim, speed: cueSpeedFor(v, table, P), side: 0, height: 0, elev: 0 };
         const res = run(table, P, balls, shot);
         if (!res.balls[0].on || !res.firstHit || !ctx.targets.includes(res.firstHit.obj)) continue;
@@ -288,13 +394,19 @@ function handPositions(ctx, balls) {
  */
 export function planShot(ctx) {
   const rng = makeRng(ctx.seed ?? 7);
+  const cfg = cfgOf(ctx);
   let balls = ctx.balls;
   let best = null;
   if (ctx.inRegion) {
     for (const p of handPositions(ctx, balls)) {
       const bs = balls.map((b, i) => (i === 0 ? { ...b, x: p.x, y: p.y } : b));
-      const plan = planFrom(ctx, bs, rng);
-      if (plan && (!best || plan.score > best.score)) best = { ...plan, cue: [p.x, p.y] };
+      const plan = planFrom(ctx, bs, rng, { refine: false, nCands: Math.min(5, cfg.cands) });
+      if (plan && (!best || plan.score > best.score)) best = { ...plan, cue: [p.x, p.y], bs };
+    }
+    if (best && cfg.refine) {
+      const cue = best.cue, bs = best.bs;
+      best = { ...refineStroke(ctx, bs, best, rng), cue };
+      delete best.bs;
     }
     if (!best) {
       // 没有好的进攻位置：放在区域内一个合法位置打防守
@@ -302,19 +414,20 @@ export function planShot(ctx) {
       if (c) balls = balls.map((b, i) => (i === 0 ? { ...b, x: c.x, y: c.y } : b));
       const s = safetyFrom(ctx, balls) ?? kickFrom(ctx, balls);
       if (s) return { kind: 'safety', ...s, cue: [balls[0].x, balls[0].y] };
-    } else if (best.p >= 0.3) return { kind: 'pot', ...best };
+    } else if (best.p >= cfg.attack) return { kind: 'pot', ...best };
     else balls = balls.map((b, i) => (i === 0 ? { ...b, x: best.cue[0], y: best.cue[1] } : b));
   } else {
     best = planFrom(ctx, balls, rng);
-    if (best && best.p >= 0.35) return { kind: 'pot', ...best };
+    if (best && best.p >= cfg.attack) return { kind: 'pot', ...best };
     // 直接进攻把握不够：看看一库翻袋
-    const bank = bankFrom(ctx, balls, rng);
+    const bank = cfg.bank ? bankFrom(ctx, balls, rng) : null;
     if (bank && (!best || bank.score > best.score)) best = bank;
-    if (best && best.p >= 0.35) return { kind: 'pot', ...best };
+    if (best && best.p >= cfg.attack) return { kind: 'pot', ...best };
   }
   // 防守；直线碰不到目标球（被做斯诺克）时一库解球
   const safe = safetyFrom(ctx, balls) ?? kickFrom(ctx, balls);
-  if (safe && (!best || best.p < 0.2)) return { kind: 'safety', ...safe, cue: best?.cue };
+  // 进攻把握不够时，防守能让对手只剩中等以下难度的球就打防守；否则硬打
+  if (safe && (!best || best.p < 0.15 || safe.oppEase < 0.6)) return { kind: 'safety', ...safe, cue: best?.cue };
   if (best) return { kind: 'pot', ...best };
   // 兜底：全球对准最近的目标球
   const c = balls[0];

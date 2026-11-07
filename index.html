@@ -90,12 +90,7 @@
       <div class="pane" id="tab-tol" hidden>
         <div class="row2">
           <label class="inline">出杆稳定性
-            <select id="noiseSel">
-              <option value="off">关闭</option>
-              <option value="pro">职业</option>
-              <option value="amateur" selected>业余</option>
-              <option value="beginner">新手</option>
-            </select>
+            <select id="noiseSel"><!-- 由 main.js 按档位生成 --></select>
           </label>
           <label class="inline">落点显示
             <select id="landingSel">
@@ -127,18 +122,10 @@
       <div class="pane" id="tab-match" hidden>
         <div class="form">
           <label class="inline">对手
-            <select id="oppSel">
-              <option value="cpu-amateur">电脑（业余）</option>
-              <option value="cpu-pro">电脑（高手）</option>
-              <option value="human">本地双人</option>
-            </select>
+            <select id="oppSel"><!-- 由 main.js 按档位生成 --></select>
           </label>
           <label class="inline">你的出杆误差
-            <select id="humanNoiseSel">
-              <option value="off">无（按你瞄的精确出杆）</option>
-              <option value="pro">职业</option>
-              <option value="amateur">业余</option>
-            </select>
+            <select id="humanNoiseSel"><!-- 由 main.js 按档位生成 --></select>
           </label>
           <label class="inline">辅助线
             <select id="aidSel">

@@ -149,3 +149,20 @@ test('电脑对手：斯诺克被咖啡球挡住时一库解球，母球先吃�
   const out = evaluateShot(g, balls, res, ts);
   assert.ok(!out.foul, out.msg.join(' '));
 });
+
+test('修正瞄准：加右塞 0.3R 时只瞄几何假想球会打偏，修正后目标球进袋', async () => {
+  const { correctAim } = await import('../src/game/ai.js');
+  const ox = 1.9, oy = 0.95;
+  const dir = Math.atan2(t8.W - oy, t8.L - ox);
+  const R = t8.R;
+  const gx = ox - 2 * R * Math.cos(dir), gy = oy - 2 * R * Math.sin(dir);
+  const balls = [cueBall(0.9, 0.55), poolBall(3, ox, oy)].map(full);
+  const geom = Math.atan2(gy - balls[0].y, gx - balls[0].x);
+  const shot = { aim: geom, speed: cueSpeedFor(1.8, t8, P8), side: 0.3, height: 0, elev: 0 };
+  const raw = simulate([strike(balls[0], t8, P8, shot).ball, balls[1]], t8, P8);
+  assert.equal(raw.balls[1].on, true, '不修正应打偏');
+  const aim = correctAim(t8, P8, balls, shot, 1, dir);
+  assert.ok(aim !== null);
+  const fixed = simulate([strike(balls[0], t8, P8, { ...shot, aim }).ball, balls[1]], t8, P8);
+  assert.equal(fixed.balls[1].on, false, '修正后应进袋');
+});
