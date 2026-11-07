@@ -338,11 +338,13 @@ function startMatch() {
     return;
   }
   const opp = $('oppSel').value;
-  S.match = { opp, aid: $('aidSel').value, humanNoise: $('humanNoiseSel').value };
-  const level = opp.startsWith('cpu-') ? opp.slice(4) : null;
-  const players = !level
-    ? [{ name: '玩家 1', cpu: false }, { name: '玩家 2', cpu: false }]
-    : [{ name: '你', cpu: false }, { name: `电脑（${NOISE_LEVELS[level].name}）`, cpu: true, level }];
+  S.match = { opp, aid: $('aidSel').value, humanNoise: $('humanNoiseSel').value, prefer147: $('cpu147').checked };
+  const level = opp.startsWith('cpu-') || opp.startsWith('watch-') ? opp.split('-')[1] : null;
+  const lvName = level && NOISE_LEVELS[level].name;
+  let players;
+  if (!level) players = [{ name: '玩家 1', cpu: false }, { name: '玩家 2', cpu: false }];
+  else if (opp.startsWith('watch-')) players = [{ name: `电脑 A（${lvName}）`, cpu: true, level }, { name: `电脑 B（${lvName}）`, cpu: true, level }];
+  else players = [{ name: '你', cpu: false }, { name: `电脑（${lvName}）`, cpu: true, level }];
   S.mode = 'match';
   S.game = createGame(S.tableKey, players);
   S.cpu.id++;
@@ -366,6 +368,7 @@ function startMatch() {
   renderScoreboard();
   renderMatchLog();
   predict();
+  if (isCpuTurn()) cpuTurn();
 }
 
 function aimAtRack() {
@@ -425,13 +428,14 @@ function finishMatchShot(a) {
     delete b.pending;
   }
   applyOutcome(g, out);
+  const max147 = g.kind === 'snooker' && !out.foul && g.brk >= 147;
   if (!keep[0].on || g.ballInHand) {
     const [x, y] = defaultCueSpot(g.ballInHand ?? 'anywhere', S.table, keep);
     keep[0] = { ...keep[0], x, y, on: true, pocket: undefined };
   }
   S.balls = keep;
   S.anim = null;
-  S.message = `${shooter}：${g.message}`;
+  S.message = `${max147 ? '🎉 147 满分杆！' : ''}${shooter}：${g.message}`;
   renderScoreboard();
   renderMatchLog();
   if (g.over) {
@@ -482,7 +486,7 @@ function cpuTurn() {
   }
   const c = aiContext(g, S.balls);
   aiWorker.postMessage({
-    kind: 'ai', id, tableKey: S.tableKey, phys: S.phys, balls: S.balls, ...c,
+    kind: 'ai', id, tableKey: S.tableKey, phys: S.phys, balls: S.balls, ...c, prefer147: !!S.match.prefer147,
     level: p.level, seed: (Math.random() * 2 ** 31) | 0,
   });
 }
@@ -501,6 +505,7 @@ function executeCpuPlan(plan) {
   const extra = [strokeName(plan.shot, plan.ballSpeed)];
   if (plan.p !== undefined) extra.push(`估计进球率 ${Math.round(plan.p * 100)}%`);
   if (plan.width !== undefined) extra.push(`瞄准容错 ${(plan.width * DEG).toFixed(2)}°`);
+  if (plan.for147) extra.unshift('冲击 147');
   S.message = `${p.name}：${kindName}${extra.length ? `（${extra.join('，')}）` : ''}`;
   S.guide = plan.guide ? { ...plan.guide, sig: ballsSig() } : null;
   predict();
@@ -1373,7 +1378,9 @@ function fillLevelSelects() {
   const desc = (n) => `瞄准 ${n.aimDeg}° · 击打点 ${n.tipMM} mm · 力度 ${n.speedPct}%`;
   $('noiseSel').innerHTML = '<option value="off">关闭</option>' + lv.map(([k, n]) => `<option value="${k}" title="${desc(n)}">${n.name}</option>`).join('');
   $('noiseSel').value = S.noiseKey;
-  $('oppSel').innerHTML = lv.map(([k, n]) => `<option value="cpu-${k}">电脑（${n.name}）</option>`).join('') + '<option value="human">本地双人</option>';
+  $('oppSel').innerHTML = lv.map(([k, n]) => `<option value="cpu-${k}">电脑（${n.name}）</option>`).join('') +
+    '<option value="human">本地双人</option>' +
+    ['elite', 'pro'].map((k) => `<option value="watch-${k}">观战：电脑对电脑（${NOISE_LEVELS[k].name}）</option>`).join('');
   $('oppSel').value = 'cpu-club';
   $('humanNoiseSel').innerHTML = '<option value="off">无（按你瞄的精确出杆）</option>' + lv.map(([k, n]) => `<option value="${k}">${n.name}</option>`).join('');
 }

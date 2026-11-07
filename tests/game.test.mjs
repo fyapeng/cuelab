@@ -166,3 +166,17 @@ test('修正瞄准：加右塞 0.3R 时只瞄几何假想球会打偏，修正�
   const fixed = simulate([strike(balls[0], t8, P8, { ...shot, aim }).ball, balls[1]], t8, P8);
   assert.equal(fixed.balls[1].on, false, '修正后应进袋');
 });
+
+test('147 模式：彩球阶段只打黑球', () => {
+  const s = snookerSpots(ts);
+  const balls = [cueBall(3.0, 0.45), snookerBall('black', ...s.black), snookerBall('blue', ...s.blue), snookerBall('pink', ...s.pink), snookerBall('red', 1.2, 0.4)].map(full);
+  const g = createGame('snooker', ['A', 'B']);
+  g.ballInHand = null;
+  g.phase = 'color';
+  const c = aiContext(g, balls);
+  const plan = planShot({ table: ts, phys: PS, balls, ...c, noise: NOISE_LEVELS.elite, level: 'elite', prefer147: true, nextTargets: (t) => c.next[t] ?? [], inRegion: null, seed: 5 });
+  assert.ok(plan.for147, `应走 147 分支：${plan.kind}`);
+  const res = simulate([strike(balls[0], ts, PS, plan.shot).ball, ...balls.slice(1)], ts, PS);
+  assert.equal(res.firstHit.obj, 1, '应先碰黑球');
+  assert.equal(res.balls[1].on, false, '黑球应进袋');
+});

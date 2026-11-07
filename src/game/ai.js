@@ -393,6 +393,24 @@ function handPositions(ctx, balls) {
  *        nextTargets(t) → 打进 t 之后下一杆的目标球, inRegion(x,y) | null（非自由球时为 null）, seed }
  */
 export function planShot(ctx) {
+  if (ctx.prefer147 && ctx.gameKind === 'snooker') {
+    const black = ctx.balls.findIndex((b, i) => i > 0 && b.sk === 'black' && b.on !== false);
+    if (black > 0 && ctx.phase === 'red') {
+      // 冲击 147：打红球时走位只以黑球为目标
+      return planCore({ ...ctx, nextTargets: () => [black] });
+    }
+    if (black > 0 && ctx.phase === 'color' && ctx.targets.includes(black)) {
+      // 红球之后只打黑球；其他彩球进袋算犯规，所以一并列为禁止
+      const others = ctx.targets.filter((i) => i !== black);
+      const plan = planCore({ ...ctx, targets: [black], forbidden: [...ctx.forbidden, ...others] });
+      if ((plan.kind === 'pot' || plan.kind === 'bank') && (plan.p ?? 0) >= 0.25) return { ...plan, for147: true };
+      // 黑球打不了：147 已经没有机会，回到正常选球
+    }
+  }
+  return planCore(ctx);
+}
+
+function planCore(ctx) {
   const rng = makeRng(ctx.seed ?? 7);
   const cfg = cfgOf(ctx);
   let balls = ctx.balls;

@@ -321,5 +321,5 @@ export function aiContext(g, balls) {
     }
     oppTargets = reds.length ? reds : lowest(-1);
   }
-  return { targets, forbidden, oppTargets, values, next, region: g.ballInHand ?? null };
+  return { targets, forbidden, oppTargets, values, next, region: g.ballInHand ?? null, gameKind: g.kind, phase: g.phase ?? null };
 }

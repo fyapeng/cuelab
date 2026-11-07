@@ -39,6 +39,9 @@ function runAI(job) {
     level: job.level,
     nextTargets: (t) => job.next[t] ?? [],
     inRegion: job.region ? (x, y) => inRegion(job.region, table, x, y) : null,
+    gameKind: job.gameKind,
+    phase: job.phase,
+    prefer147: job.prefer147,
     seed: job.seed,
   });
   self.postMessage({ kind: 'ai', id: job.id, plan, ms: performance.now() - t0 });
