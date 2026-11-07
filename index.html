@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CueLab 台球物理实验室</title>
+  <link rel="stylesheet" href="src/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#f6f4ea"/><circle cx="12" cy="12" r="4.2" fill="#1f7f72"/></svg>
+      <b>CueLab</b><span>台球物理实验室</span>
+    </div>
+    <div class="seg" id="modeSeg">
+      <button data-mode="practice" class="on">练习</button>
+      <button data-mode="match">对局</button>
+    </div>
+    <div class="tb-controls">
+      <select id="tableSel" title="球台">
+        <option value="eight">中式八球</option>
+        <option value="snooker">斯诺克</option>
+        <option value="pool">美式九球</option>
+      </select>
+      <select id="layoutSel" title="摆球"></select>
+      <button id="undoBtn" class="ghost" title="Ctrl+Z">撤销</button>
+      <button id="resetBtn" class="ghost">重摆</button>
+    </div>
+  </header>
+
+  <main class="app">
+    <section class="stage">
+      <div class="scoreboard" id="scoreboard" hidden></div>
+      <div id="tableWrap">
+        <canvas id="table"></canvas>
+        <div class="overlay" id="overlay" hidden></div>
+      </div>
+
+      <div class="hud" id="hud"></div>
+
+      <div class="dock">
+        <div class="hp-box">
+          <canvas id="hitpoint"></canvas>
+          <div id="hitInfo" class="hp-label"></div>
+        </div>
+        <div class="dock-main">
+          <div class="power">
+            <div class="power-head">
+              <span>力度</span>
+              <b id="powerOut"></b>
+              <em id="powerClass"></em>
+            </div>
+            <input type="range" id="power" min="0" max="1000" step="1" />
+            <div class="power-scale"><span>推球</span><span>轻</span><span>中</span><span>重</span><span>开球</span></div>
+            <div class="dim small" id="powerDesc"></div>
+          </div>
+          <div class="dock-row">
+            <label class="mini"><span>杆仰角</span><input type="range" id="elev" min="0" max="35" step="0.5" value="0" /><output id="elevOut"></output></label>
+            <div class="aim-box"><span>方向</span><output id="aimOut"></output><button id="aimLock" class="chip-btn"></button></div>
+          </div>
+        </div>
+        <div class="dock-actions">
+          <button id="shootBtn" class="primary">击球<small>空格</small></button>
+          <select id="playback" title="回放速度">
+            <option value="0.25">0.25× 慢放</option>
+            <option value="0.5">0.5× 慢放</option>
+            <option value="1" selected>1× 实时</option>
+            <option value="2">2× 快放</option>
+          </select>
+        </div>
+      </div>
+      <div class="statusbar"><span id="status"></span>
+        <span class="legend-inline"><i style="background:#ff9f43"></i>滑动 <i style="background:#4cc9f0"></i>滚动 <i class="ring"></i>假想球 / 停球位置 <i style="background:rgba(120,255,140,.6)"></i>进袋窗口</span>
+      </div>
+    </section>
+
+    <aside class="side">
+      <nav class="tabs" id="tabs">
+        <button data-tab="detail" class="on">详情</button>
+        <button data-tab="tol">容错</button>
+        <button data-tab="bank">翻袋 / 解球</button>
+        <button data-tab="match">对局</button>
+        <button data-tab="settings">设置</button>
+      </nav>
+
+      <div class="pane" id="tab-detail">
+        <div id="result"></div>
+      </div>
+
+      <div class="pane" id="tab-tol" hidden>
+        <div class="row2">
+          <label class="inline">出杆稳定性
+            <select id="noiseSel">
+              <option value="off">关闭</option>
+              <option value="pro">职业</option>
+              <option value="amateur" selected>业余</option>
+              <option value="beginner">新手</option>
+            </select>
+          </label>
+          <label class="inline">落点显示
+            <select id="landingSel">
+              <option value="region">范围椭圆</option>
+              <option value="dots">散点</option>
+              <option value="both">两者</option>
+              <option value="off">不显示</option>
+            </select>
+          </label>
+        </div>
+        <div id="mcOut"></div>
+        <label class="check"><input type="checkbox" id="shootNoise" /> 击球时按上面的稳定性加入随机误差</label>
+      </div>
+
+      <div class="pane" id="tab-bank" hidden>
+        <label class="inline">目标球 <select id="targetSel"></select></label>
+        <div class="btn-row">
+          <button id="bankBtn">找一库翻袋线路</button>
+          <button id="kickBtn">找一库解球线路</button>
+        </div>
+        <div id="solveOut"></div>
+        <details class="explain">
+          <summary>镜像法是什么</summary>
+          <p>把袋口（翻袋）或目标球（解球）沿库边翻折到台面外，瞄准翻折后的点，直线与库边的交点就是理论上的碰库点。球心碰库时离库边正好一个球半径，所以翻折轴取库边内一个半径处的那条线。</p>
+          <p>真实反弹角和镜像法不完全一样：慢球、带上旋的球离库后会向前“拐”，快球把库边压得更深，加塞会让反弹角变大或变小，库边摩擦也会吃掉一部分沿库方向的速度。所以这里先用镜像法算几何线路，再在它附近逐个瞄准角做物理模拟，找出真正能进的区间。换力度或加塞后重新搜索，可以看到线路怎么移动。</p>
+        </details>
+      </div>
+
+      <div class="pane" id="tab-match" hidden>
+        <div class="form">
+          <label class="inline">对手
+            <select id="oppSel">
+              <option value="cpu-amateur">电脑（业余）</option>
+              <option value="cpu-pro">电脑（高手）</option>
+              <option value="human">本地双人</option>
+            </select>
+          </label>
+          <label class="inline">你的出杆误差
+            <select id="humanNoiseSel">
+              <option value="off">无（按你瞄的精确出杆）</option>
+              <option value="pro">职业</option>
+              <option value="amateur">业余</option>
+            </select>
+          </label>
+          <label class="inline">辅助线
+            <select id="aidSel">
+              <option value="basic">基础（瞄准线 + 假想球）</option>
+              <option value="full">完整（全部预测）</option>
+              <option value="none">关闭</option>
+            </select>
+          </label>
+          <button id="startMatch" class="primary wide">开始对局</button>
+        </div>
+        <div id="matchLog"></div>
+        <details class="explain" open>
+          <summary>规则说明</summary>
+          <div id="rulesText"></div>
+        </details>
+      </div>
+
+      <div class="pane" id="tab-settings" hidden>
+        <div class="sub">显示</div>
+        <label class="check"><input type="checkbox" id="opt_allPaths" /> 显示所有球的轨迹</label>
+        <label class="check"><input type="checkbox" id="opt_ghost" /> 显示假想球与瞄准线</label>
+        <label class="check"><input type="checkbox" id="opt_window" /> 显示进袋窗口（绿色区域）</label>
+        <div class="sep"></div>
+        <div class="sub">台呢速度</div>
+        <div class="seg small-seg" id="clothSeg">
+          <button data-cloth="slow">慢台</button>
+          <button data-cloth="std" class="on">标准</button>
+          <button data-cloth="fast">快台</button>
+        </div>
+        <div class="dim small">决定滚动阻力 μr，也就是同样力度下球能滚多远。可以在真实球台上推一颗球，对照力度条下方的“自由滚动约几个台长”来选。</div>
+        <div class="sep"></div>
+        <div class="sub">物理参数</div>
+        <div id="params"></div>
+        <div class="sep"></div>
+        <div class="sub">操作</div>
+        <ul class="help">
+          <li>移动鼠标瞄准；单击空白处锁定 / 解锁；←/→ 微调 0.05°（Shift 为 0.5°），↑/↓ 调力度。</li>
+          <li>拖动击打点控件或按 W/A/S/D 调整高低杆与左右塞，双击回中。</li>
+          <li>练习模式下可拖动任意球；双击空白处加球，双击目标球删除。对局中只有自由球时能拖动母球。</li>
+          <li>空格击球，Ctrl+Z 撤销（练习模式）。</li>
+        </ul>
+      </div>
+    </aside>
+  </main>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
