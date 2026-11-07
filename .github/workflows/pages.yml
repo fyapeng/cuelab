@@ -1,0 +1,41 @@
+# 推送到 main 后：跑测试 → 给资源地址加版本号 → 发布到 GitHub Pages
+name: Deploy Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 测试
+        run: node --test tests/physics.test.mjs tests/game.test.mjs
+      - name: 组装站点并加版本号
+        run: |
+          mkdir -p _site
+          cp -r index.html src _site/
+          node tools/stamp.mjs "${GITHUB_SHA::8}" _site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
